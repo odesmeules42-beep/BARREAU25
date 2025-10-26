@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Auth from './components/Auth';
 import Settings from './components/Settings';
@@ -7,9 +7,11 @@ import Sidebar from './components/Sidebar';
 import ProgressTab from './components/ProgressTab';
 import TestsTab from './components/TestsTab';
 import ResultsTab from './components/ResultsTab';
+import { supabase } from './lib/supabase';
+
 const LandingPage = lazy(() => import('./components/landing/LandingPage'));
 
-function Dashboard({ isAuthenticated, setIsAuthenticated }: { 
+function Dashboard({ isAuthenticated, setIsAuthenticated }: {
   isAuthenticated: boolean;
   setIsAuthenticated: (value: boolean) => void;
 }) {
@@ -40,6 +42,41 @@ function Dashboard({ isAuthenticated, setIsAuthenticated }: {
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initialiseSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        setIsAuthenticated(!!session);
+      } finally {
+        if (isMounted) {
+          setAuthLoading(false);
+        }
+      }
+    };
+
+    initialiseSession();
+
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setIsAuthenticated(!!session);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   return (
     <BrowserRouter>
@@ -48,13 +85,31 @@ function App() {
           <div className="text-xl">Chargement...</div>
         </div>
       }>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/auth" element={<Auth onLogin={() => setIsAuthenticated(true)} />} />
-          <Route path="/app/*" element={
-            isAuthenticated ? <Dashboard isAuthenticated={isAuthenticated} setIsAuthenticated={setIsAuthenticated} /> : <Navigate to="/auth" />
-          } />
-        </Routes>
+        {authLoading ? (
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-xl">Chargement...</div>
+          </div>
+        ) : (
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route
+              path="/auth"
+              element={
+                isAuthenticated
+                  ? <Navigate to="/app" replace />
+                  : <Auth onLogin={() => setIsAuthenticated(true)} />
+              }
+            />
+            <Route
+              path="/app/*"
+              element={
+                isAuthenticated
+                  ? <Dashboard isAuthenticated={isAuthenticated} setIsAuthenticated={setIsAuthenticated} />
+                  : <Navigate to="/auth" replace />
+              }
+            />
+          </Routes>
+        )}
       </Suspense>
     </BrowserRouter>
   );
